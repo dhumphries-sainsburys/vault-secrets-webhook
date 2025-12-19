@@ -207,6 +207,7 @@ serviceAccount:
   labels: {}
   # -- Annotations to add to the service account.
   # For example, use `iam.gke.io/gcp-service-account: gsa@project.iam.gserviceaccount.com` to enable GKE workload identity.
+  # For Azure workload identity, use `azure.workload.identity/client-id: <client-id>` to enable ACR authentication.
   annotations: {}
 
 deployment:
