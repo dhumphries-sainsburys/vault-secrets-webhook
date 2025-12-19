@@ -90,6 +90,70 @@ The auto-generated rules **only** open ports 10250 and 443 between masters and n
 
 You can read more information on how to add firewall rules for the GKE control plane nodes in the [GKE docs](https://cloud.google.com/kubernetes-engine/docs/how-to/private-clusters#add_firewall_rules).
 
+### Using Azure Workload Identity for ACR Authentication
+
+The webhook supports Azure Workload Identity for authenticating to Azure Container Registry (ACR) when pulling private images. This provides a secure, credential-free way to authenticate without storing service principal credentials.
+
+#### Prerequisites
+
+1. An AKS cluster with OIDC issuer and workload identity enabled
+2. A user-assigned managed identity with `AcrPull` role on your ACR
+3. A federated identity credential linking the managed identity to the webhook's service account
+
+#### Setup
+
+1. Enable workload identity on your AKS cluster (if not already enabled):
+
+```bash
+az aks update \
+  --resource-group <resource-group> \
+  --name <cluster-name> \
+  --enable-oidc-issuer \
+  --enable-workload-identity
+```
+
+2. Create a user-assigned managed identity and assign it the `AcrPull` role on your ACR:
+
+```bash
+az identity create \
+  --resource-group <resource-group> \
+  --name <identity-name>
+
+az role assignment create \
+  --assignee <client-id> \
+  --role AcrPull \
+  --scope /subscriptions/<subscription-id>/resourceGroups/<acr-resource-group>/providers/Microsoft.ContainerRegistry/registries/<acr-name>
+```
+
+3. Create a federated identity credential:
+
+```bash
+az identity federated-credential create \
+  --name <federated-credential-name> \
+  --identity-name <identity-name> \
+  --resource-group <resource-group> \
+  --issuer <oidc-issuer-url> \
+  --subject system:serviceaccount:vswh:vault-secrets-webhook
+```
+
+4. Install the webhook with the workload identity annotation:
+
+```bash
+helm install vswh --namespace vswh --wait oci://ghcr.io/bank-vaults/helm-charts/vault-secrets-webhook \
+  --create-namespace \
+  --set serviceAccount.annotations."azure\.workload\.identity/client-id"=<client-id>
+```
+
+Alternatively, you can set the annotation in your values file:
+
+```yaml
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: <client-id>
+```
+
+The webhook will automatically use the workload identity to authenticate to ACR when pulling private container images specified in pod definitions.
+
 ## Values
 
 The following table lists the configurable parameters of the Helm chart.
@@ -154,7 +218,7 @@ The following table lists the configurable parameters of the Helm chart.
 | `serviceAccount.create` | bool | `true` | Specifies whether a service account should be created |
 | `serviceAccount.name` | string | `""` | The name of the service account to use. If not set and `create` is true, a name is generated using the fullname template. |
 | `serviceAccount.labels` | object | `{}` | Labels to add to the service account |
-| `serviceAccount.annotations` | object | `{}` | Annotations to add to the service account. For example, use `iam.gke.io/gcp-service-account: gsa@project.iam.gserviceaccount.com` to enable GKE workload identity. |
+| `serviceAccount.annotations` | object | `{}` | Annotations to add to the service account. For example, use `iam.gke.io/gcp-service-account: gsa@project.iam.gserviceaccount.com` to enable GKE workload identity. For Azure workload identity, use `azure.workload.identity/client-id: <client-id>` to enable ACR authentication. |
 | `deployment.strategy` | object | `{}` | Rolling strategy for webhook deployment |
 | `customResourceMutations` | list | `[]` | List of CustomResources to inject values from Vault, for example: ["ingresses", "servicemonitors"] |
 | `customResourcesFailurePolicy` | string | `"Ignore"` |  |
@@ -164,6 +228,7 @@ The following table lists the configurable parameters of the Helm chart.
 | `podsFailurePolicy` | string | `"Ignore"` |  |
 | `secretsFailurePolicy` | string | `"Ignore"` |  |
 | `apiSideEffectValue` | string | `"NoneOnDryRun"` | Webhook sideEffect value Check: <https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#side-effects> |
+| `ignoreReleaseNamespace` | bool | `true` | Enables the webhook to ignore resources in the namespace it is deployed to. Set to `false` to enable mutations within the namespace the webhook runs in. |
 | `namespaceSelector` | object | `{}` | Namespace selector to use, will limit webhook scope (K8s version 1.15+) |
 | `matchConditions` | object | `{}` | MatchConditions to use, allows for more complex selectors (K8s version 1.27+) Check https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/#matching-requests-matchconditions |
 | `objectSelector` | object | `{}` | Object selector to use, will limit webhook scope (K8s version 1.15+) |
