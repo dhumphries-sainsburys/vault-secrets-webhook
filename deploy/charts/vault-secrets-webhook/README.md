@@ -136,21 +136,27 @@ az identity federated-credential create \
   --subject system:serviceaccount:vswh:vault-secrets-webhook
 ```
 
-4. Install the webhook with the workload identity annotation:
+4. Install the webhook with the workload identity annotation and label:
 
 ```bash
 helm install vswh --namespace vswh --wait oci://ghcr.io/bank-vaults/helm-charts/vault-secrets-webhook \
   --create-namespace \
-  --set serviceAccount.annotations."azure\.workload\.identity/client-id"=<client-id>
+  --set serviceAccount.annotations."azure\.workload\.identity/client-id"=<client-id> \
+  --set labels."azure\.workload\.identity/use"="true"
 ```
 
-Alternatively, you can set the annotation in your values file:
+Alternatively, you can set the annotation and label in your values file:
 
 ```yaml
 serviceAccount:
   annotations:
     azure.workload.identity/client-id: <client-id>
+
+labels:
+  azure.workload.identity/use: "true"
 ```
+
+> **Note:** The `azure.workload.identity/use: "true"` label is required on the webhook pod for Azure Workload Identity to inject the necessary environment variables and token volume. While the Azure Workload Identity webhook typically adds this label automatically based on the service account annotation, the vault-secrets-webhook pod has a `security.banzaicloud.io/mutate: skip` label that prevents mutations, so the label must be set explicitly via the `labels` value.
 
 The webhook will automatically use the workload identity to authenticate to ACR when pulling private container images specified in pod definitions.
 
